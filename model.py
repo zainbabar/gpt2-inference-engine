@@ -108,10 +108,8 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
     def forward(self, inputs):
-        outputs = self.ln_1(inputs)
-        outputs = self.attn(outputs)
-        outputs = self.ln_2(outputs)
-        outputs = self.mlp(outputs)
+        outputs = inputs + self.attn(self.ln_1(inputs))
+        outputs = outputs + self.mlp(self.ln_2(outputs))
         return outputs
 
 
@@ -166,8 +164,8 @@ class GPT2(nn.Module):
         return scores
 
     # loader, load the pretrained weights from hf
-    @classmethod # class method, works on the actual class not an obj
-    def from_pretrained(cls):  
+    @classmethod  # class method, works on the actual class not an obj
+    def from_pretrained(cls):
         from transformers import GPT2LMHeadModel
 
         # build the model here, and load the weights
@@ -188,7 +186,7 @@ class GPT2(nn.Module):
             "mlp.c_fc.weight",
             "mlp.c_proj.weight",
         )
-        
+
         # track that we have loaded every key in our model
         loaded = set()
         with torch.no_grad():
@@ -199,27 +197,25 @@ class GPT2(nn.Module):
                     checkpoint = torch.transpose(hf_sd[key], -2, -1)
                 else:
                     checkpoint = hf_sd[key]
-                
+
                 # parse the key for lookup in our table
-                parsed_key = key.removeprefix("transformer.") 
+                parsed_key = key.removeprefix("transformer.")
                 # check shape matches our tensor
                 if checkpoint.shape != sd[parsed_key].shape:
                     raise RuntimeError(f"{key} shape does not match")
 
                 # set ours if everything is fine
-                sd[parsed_key].copy_(checkpoint) # copy the checkpoint into thats value
+                sd[parsed_key].copy_(checkpoint)  # copy the checkpoint into thats value
                 loaded.add(parsed_key)
-            
+
         if set(sd.keys()) != loaded:
             for key in set(sd.keys()):
                 if key not in loaded:
                     print(key, " ")
             raise RuntimeError("not all keys were loaded")
-        
-        # everything is good, just return 
+
+        # everything is good, just return
         return gpt2.eval()
-        
-        
 
 
 if __name__ == "__main__":
@@ -231,9 +227,19 @@ if __name__ == "__main__":
     # plain copy
     print("wte:", torch.equal(model.wte.weight, hf_sd["transformer.wte.weight"]))
     # transposed copies (c_proj is the square one)
-    print("h.0 c_attn:", torch.equal(model.h[0].attn.c_attn.weight,
-                                     hf_sd["transformer.h.0.attn.c_attn.weight"].t()))
-    print("h.5 attn c_proj:", torch.equal(model.h[5].attn.c_proj.weight,
-                                          hf_sd["transformer.h.5.attn.c_proj.weight"].t()))
+    print(
+        "h.0 c_attn:",
+        torch.equal(
+            model.h[0].attn.c_attn.weight,
+            hf_sd["transformer.h.0.attn.c_attn.weight"].t(),
+        ),
+    )
+    print(
+        "h.5 attn c_proj:",
+        torch.equal(
+            model.h[5].attn.c_proj.weight,
+            hf_sd["transformer.h.5.attn.c_proj.weight"].t(),
+        ),
+    )
     # tying survived loading
     print("tied:", model.lm_head.weight is model.wte.weight)
