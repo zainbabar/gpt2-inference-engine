@@ -10,11 +10,12 @@ class GPT2Config:
     n_layer: int = 12  # how many attention layers
     n_head: int = 12  # how many attention heads
     n_embd: int = 768  # how many numbers in token vector
+    layer_norm_epsilon = 1e-05 # tiny value added to avoid / 0 if var/sd = 0
 
 
 # our mlp class for the FNN between attention layers
 class MLP(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: GPT2Config):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, config.n_embd * 4)  # expand layer
         self.c_proj = nn.Linear(config.n_embd * 4, config.n_embd)  # shrink
@@ -25,7 +26,7 @@ class MLP(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: GPT2Config):
         super().__init__()
         self.c_attn = nn.Linear(
             config.n_embd, config.n_embd * 3
@@ -94,3 +95,28 @@ class Attention(nn.Module):
 
         return attn
 
+# the entire decoder block combining masked self attention, ffn, and layer normalization between
+class Block(nn.Module): 
+    def __init__(self, config: GPT2Config):
+        super().__init__()
+        # the pieces we run inputs thru
+        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.attn = Attention(config)
+        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.mlp = MLP(config)
+    
+    def forward(self, inputs):
+        outputs = self.ln_1(inputs)
+        outputs = self.attn(outputs)
+        outputs = self.ln_2(outputs)
+        outputs = self.mlp(outputs)
+        return outputs
+        
+if __name__ == "__main__":
+    cfg = GPT2Config()
+    block = Block(cfg)
+    for shape in [(1, 1, 768), (1, 5, 768), (2, 7, 768)]:
+        out = block(torch.randn(*shape))
+        assert tuple(out.shape) == shape, f"{shape} -> {tuple(out.shape)}"
+    print("block shapes ok")
+    print(list(block.state_dict().keys()))
