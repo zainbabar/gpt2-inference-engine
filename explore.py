@@ -14,6 +14,8 @@ print(sd["lm_head.weight"].data_ptr() == sd["transformer.wte.weight"].data_ptr()
 
 linear = nn.Linear(768, 2304)
 print(linear.weight.shape)
+for k, v in hf.state_dict().items():
+    print(k, tuple(v.shape))
 
 
 # legend

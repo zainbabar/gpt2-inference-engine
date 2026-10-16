@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
+import tiktoken
 
 
 @dataclass
@@ -111,7 +112,54 @@ class Block(nn.Module):
         outputs = self.ln_2(outputs)
         outputs = self.mlp(outputs)
         return outputs
-        
+    
+# before this we take text to token ids w/ tiktoken
+# we need to take this token id and look up its into a LEARNED vector
+# also need to take the positon of the token in the full sentence and add it also learned
+class GPT2(nn.Module):
+    def __init__(self, config: GPT2Config):
+        super().__init__()
+        # token table, match token id to token
+        # vocab size rows i.e. how many unique tokens model knows, each token vector size n_embd
+        self.wte = nn.Embedding(num_embeddings=config.vocab_size, embedding_dim=config.n_embd)
+        self.wpe = nn.Embedding(num_embeddings=config.n_positions, embedding_dim=config.n_embd)
+
+        # h for hidden, the 12 decorder blocks, list comprehension to do 12 calls, 12 unique blocks
+        self.h = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
+
+        # final layernorm
+        self.ln_f = nn.LayerNorm(config.n_embd)
+        # language modelling head, takes each tokens vector and turns it into a 
+        # prediction scores for every token in vocab to be the next token
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size)
+        # weight typing, b/c wte and lm head both do same job in opposite dir, 1 table used both ways
+        # wte: token -> vector, lm_head: vector -> token
+        self.lm_head.weight = self.wte.weight 
+    
+    def forward(self, token_ids):
+        # build the embeddings first from tokens
+        # token_ids shape is (B, T)
+        E = self.wte(token_ids) 
+        # embeddings shape is (B, T, 768) now, every token is now a 768 long vector
+        # wte is straightforward, but wpe looks up based on token POSITION
+        # i.e. token 1 gets token id wte, and then pte[1]
+        T = token_ids.shape[-1]
+        positons = torch.arange(T) # postions 1  to T-1 for positon lookup
+        P = self.wpe(positons)
+        # P has shape (T, 768)
+        embeddings = E + P 
+        # works, b/c pytorch broadcasts it, positon 0 means the same thing for every batch (sentence)
+
+        # pass thru all blocks
+        attended_embeddings = embeddings
+        for block in self.h:
+            attended_embeddings = block(attended_embeddings)
+
+        # normalize and run thru lm head to get scores per vocab token
+        scores = self.lm_head(self.ln_f(attended_embeddings))
+        return scores
+       
+
 if __name__ == "__main__":
     cfg = GPT2Config()
     block = Block(cfg)
@@ -120,3 +168,9 @@ if __name__ == "__main__":
         assert tuple(out.shape) == shape, f"{shape} -> {tuple(out.shape)}"
     print("block shapes ok")
     print(list(block.state_dict().keys()))
+
+    gpt2 = GPT2(cfg)
+    token_ids = torch.randint(0, 50257, (1, 5))
+    scores = gpt2(token_ids)
+    print(scores.shape)
+    print(gpt2.lm_head.weight is gpt2.wte.weight)
