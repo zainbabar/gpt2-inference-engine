@@ -2,38 +2,54 @@ from model import GPT2
 import torch
 import tiktoken
 
-ENCODING = tiktoken.get_encoding("gpt2")
-CONTEXT_SIZE = 1024
+ENCODING = tiktoken.get_encoding("gpt2")  # same tokenizer gpt2 was trained w/
+CONTEXT_SIZE = 1024  # max tokens the model can see at once (wpe only has 1024 rows)
 
 
-def generate(model: GPT2, text: str, max_new_tokens: int=CONTEXT_SIZE):
-    # convert to tensor of ids, unsqueeze adds the batch dim for (B, T) shape w/ B = 1
+def generate(
+    model: GPT2, text: str, temperature: int = 0, max_new_tokens: int = CONTEXT_SIZE
+):
+    # text -> token ids -> tensor, unsqueeze(0) adds the batch dim
+    # so shape is (B, T) w/ B = 1
     token_ids = (torch.tensor(ENCODING.encode(text), dtype=torch.long)).unsqueeze(0)
-    for _ in range(max_new_tokens):
-        # break out early if we still have tokens to go but hit our context size
-        if token_ids.shape[-1] >= CONTEXT_SIZE:
-            B = token_ids.shape[0]
-            token_ids = token_ids.tolist()
-            generated_texts = [  # build texts for all the batches
-                ENCODING.decode(token_ids[i]) for i in range(B)
-            ]
-            return generated_texts
+    with torch.no_grad():
+        for _ in range(max_new_tokens):
+            # stop early if we hit the context size, even if we still have tokens to go
+            # the model cant take more than CONTEXT_SIZE tokens
+            if token_ids.shape[-1] >= CONTEXT_SIZE:
+                B = token_ids.shape[0]
+                token_ids = token_ids.tolist()
+                # decode every sequence in the batch back to text
+                generated_texts = [ENCODING.decode(token_ids[i]) for i in range(B)]
+                return generated_texts
 
-        # scores for next token at every pos 
-        logits = model.forward(token_ids)  # shape (B, T, vocab_size)
+            # scores (logits) for the next token at every position
+            logits = model(token_ids)  # shape (B, T, vocab_size)
 
-        # take scores of last token for all batches
-        next_token_scores = logits[:, -1, :] # shape (B, vocab_size)
+            # only the last position's scores matter, thats the prediction for
+            # the token that comes after everything we have so far
+            next_token_scores = logits[:, -1, :]  # shape (B, vocab_size)
 
-        # take the highest score per batch, so shape (B, 1)
-        new_token_id = next_token_scores.argmax(dim=-1, keepdim=True)
+            # greedy: pick the highest scoring token for each sequence
+            # keepdim so shape is (B, 1) not (B,), lets us cat it onto token_ids
+            if temperature == 0:
+                new_token_id = next_token_scores.argmax(dim=-1, keepdim=True)
+            else:
+                # temperature rescales the scores before softmax
+                # < 1 sharpens (safer, closer to greedy), > 1 flattens (more random)
+                next_token_scores = next_token_scores / temperature
+                # softmax over the vocab: scores -> probabilities that sum to 1
+                probs = torch.softmax(next_token_scores, dim=-1)  # (B, vocab_size)
+                # sample instead of argmax: a weighted die roll, so likely tokens
+                # usually win but not always, which breaks greedy's repetition loops
+                new_token_id = torch.multinomial(probs, num_samples=1)  # (B, 1)
 
-        # attach new token to the end of our current tensor of token ids
-        token_ids = torch.cat((token_ids, new_token_id), dim=-1)
-        # new shape is (B, T + 1) for the new token
+            # attach the new token to the end of each sequence
+            token_ids = torch.cat((token_ids, new_token_id), dim=-1)
+            # new shape is (B, T + 1)
 
-    # finish generating tokens, hit our max new tokens limit
-    # return list of texts
+    # done generating, hit max_new_tokens
+    # decode every sequence in the batch back to text and return the list
     B = token_ids.shape[0]
     token_ids = token_ids.tolist()
     generated_texts = [ENCODING.decode(token_ids[i]) for i in range(B)]
@@ -41,10 +57,11 @@ def generate(model: GPT2, text: str, max_new_tokens: int=CONTEXT_SIZE):
 
 
 if __name__ == "__main__":
-    gpt2 = GPT2.from_pretrained()  # builds model, gpt2config is known in model.py
+    # builds the model and loads hf's weights, uses the GPT2Config defaults
+    gpt2 = GPT2.from_pretrained()
     text = (
         "hello world isn't a beautiful day today? "
         "i love studying linear algebra and building models from scratch"
     )
-    generated_text = generate(gpt2, text)
+    generated_text = generate(gpt2, text, temperature=0.7, max_new_tokens=10)
     print(generated_text)
