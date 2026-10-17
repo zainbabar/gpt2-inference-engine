@@ -7,7 +7,11 @@ CONTEXT_SIZE = 1024  # max tokens the model can see at once (wpe only has 1024 r
 
 
 def generate(
-    model: GPT2, text: str, temperature: int = 0, max_new_tokens: int = CONTEXT_SIZE
+    model: GPT2,
+    text: str,
+    temperature: int = 0,
+    top_k=None,
+    max_new_tokens: int = CONTEXT_SIZE,
 ):
     # text -> token ids -> tensor, unsqueeze(0) adds the batch dim
     # so shape is (B, T) w/ B = 1
@@ -38,6 +42,15 @@ def generate(
                 # temperature rescales the scores before softmax
                 # < 1 sharpens (safer, closer to greedy), > 1 flattens (more random)
                 next_token_scores = next_token_scores / temperature
+
+                # filter out any vocab scores not in the top k
+                if top_k is not None:
+                    values, _ = torch.topk(next_token_scores, k=top_k, dim=-1)
+                    # anything >= the last top k value is valid, so cutuoff
+                    cutoffs = values[..., -1:] # shape (B, 1), slice to keep the dim
+                    mask = next_token_scores < cutoffs # true means fill
+                    next_token_scores = torch.masked_fill(next_token_scores, mask, float("-inf"))
+
                 # softmax over the vocab: scores -> probabilities that sum to 1
                 probs = torch.softmax(next_token_scores, dim=-1)  # (B, vocab_size)
                 # sample instead of argmax: a weighted die roll, so likely tokens
