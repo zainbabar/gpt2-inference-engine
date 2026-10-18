@@ -47,9 +47,11 @@ def generate(
                 if top_k is not None:
                     values, _ = torch.topk(next_token_scores, k=top_k, dim=-1)
                     # anything >= the last top k value is valid, so cutuoff
-                    cutoffs = values[..., -1:] # shape (B, 1), slice to keep the dim
-                    mask = next_token_scores < cutoffs # true means fill
-                    next_token_scores = torch.masked_fill(next_token_scores, mask, float("-inf"))
+                    cutoffs = values[..., -1:]  # shape (B, 1), slice to keep the dim
+                    mask = next_token_scores < cutoffs  # true means fill
+                    next_token_scores = torch.masked_fill(
+                        next_token_scores, mask, float("-inf")
+                    )
 
                 # softmax over the vocab: scores -> probabilities that sum to 1
                 probs = torch.softmax(next_token_scores, dim=-1)  # (B, vocab_size)
