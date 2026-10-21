@@ -4,7 +4,7 @@ GPT-2 (the 124M model) built from scratch in PyTorch. I load Hugging Face's pret
 
 ## How it works
 
-Token ids get looked up in two learned tables, one for the token (`wte`) and one for its position in the sequence (`wpe`), and the two vectors are added together. That goes through 12 transformer blocks. Each block runs masked self-attention and then an MLP, with a LayerNorm before each one and a residual connection around each one. After the last block there's a final LayerNorm, and the LM head turns each token's vector into a score (logit) for every token in the vocabulary being the next one.
+Token ids get looked up in two learned tables, one for the token (`wte`) and one for its position in the sequence (`wpe`), and the two vectors are added together. The sum goes through 12 transformer blocks. Each block runs masked self-attention and then an MLP, with a LayerNorm before each one and a residual connection around each one. After the last block there's a final LayerNorm, and the LM head turns each position's vector into a score (logit) for how likely each token in the vocabulary is to come next.
 
 Attention currently loops over the 12 heads one at a time. I wrote it that way to see each head compute its own scores, causal mask, and softmax before batching them together.
 

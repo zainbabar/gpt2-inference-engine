@@ -10,7 +10,8 @@ def generate(
     model: GPT2,
     text: str,
     temperature: int = 0,
-    top_k=None,
+    top_k: int = None,
+    top_p: float = None,
     max_new_tokens: int = CONTEXT_SIZE,
 ):
     # text -> token ids -> tensor, unsqueeze(0) adds the batch dim
@@ -55,9 +56,22 @@ def generate(
 
                 # softmax over the vocab: scores -> probabilities that sum to 1
                 probs = torch.softmax(next_token_scores, dim=-1)  # (B, vocab_size)
-                # sample instead of argmax: a weighted die roll, so likely tokens
-                # usually win but not always, which breaks greedy's repetition loops
-                new_token_id = torch.multinomial(probs, num_samples=1)  # (B, 1)
+                if top_p is not None:
+                    # sort high to low; sorted_ids[i] says which token sorted position i came from
+                    sorted_probs, sorted_ids = torch.sort(probs, dim=-1, descending=True)  # (B, V) each
+                    cumulative = torch.cumsum(sorted_probs, dim=-1)
+                    # remove a token if the total BEFORE it already reached top_p
+                    # (keeps the token that crosses top_p, and always keeps the top token)
+                    remove = (cumulative - sorted_probs) >= top_p
+                    sorted_probs = sorted_probs.masked_fill(remove, 0.0)
+                    sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True)  # renormalize
+                    # sample a sorted position, then look up which real token it is
+                    choice = torch.multinomial(sorted_probs, num_samples=1)        # (B, 1)
+                    new_token_id = torch.gather(sorted_ids, dim=-1, index=choice)  # (B, 1)
+                else:
+                    # sample instead of argmax: a weighted die roll, so likely tokens
+                    # usually win but not always, which breaks greedy's repetition loops
+                    new_token_id = torch.multinomial(probs, num_samples=1)  # (B, 1)
 
             # attach the new token to the end of each sequence
             token_ids = torch.cat((token_ids, new_token_id), dim=-1)
