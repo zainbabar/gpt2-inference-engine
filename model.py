@@ -48,51 +48,55 @@ class Attention(nn.Module):
         qkv = self.c_attn(inputs)  # shape (B, T, 2304)
         # split into chunks of 768 along the last dim, each is (B, T, 768)
         Q, K, V = torch.split(qkv, self.n_embd, dim=-1)
-
+        B, T = Q.shape[0], Q.shape[1]
         # 12 heads, each owns a 64 col slice: cols 0-63 are head 0, 64-127 head 1...
         # each head does its own scores, causal mask, and softmax
-        # so we split up the heads and do them one at a time
+        # so we split up the heads and do them all at once
 
-        # loop version of multihead attention first
-        multihead_attn = []  # each head's output, cat them at the end
-        for head in range(self.n_head):
-            # all tokens, just this head's columns of Q, K, V
-            # (these are slices of Q/K/V, not weight matrices)
-            start, end = head * self.head_dim, (head + 1) * self.head_dim
-            W_Q = Q[..., start:end]  # inclusive:exclusive
-            W_K = K[..., start:end]
-            W_V = V[..., start:end]
-            d_k = torch.tensor(self.head_dim)
-            # shape here is (B, T, 64)
+        # VECTORIZED MULTIHEAD ATTENTION
+        # reshape the last dim into 12 x 64
+        # tensor.view returns same data w/ diff shape
+        Q = Q.view(B, T, self.n_head, (self.n_embd // self.n_head))
+        K = K.view(B, T, self.n_head, (self.n_embd // self.n_head))
+        V = V.view(B, T, self.n_head, (self.n_embd // self.n_head))
+        # shape (B, T, 12, 64)
 
-            # each token gets a score w/ every other token, Q @ K^T
-            scores = torch.matmul(W_Q, torch.transpose(W_K, -2, -1))  # shape (B, T, T)
-            # scale by 1 / sqrt(d_k), otherwise dot products grow w/ the dim
-            # and softmax gets super peaky
-            scale = 1 / torch.sqrt(d_k)
-            scaled_scores = scale * scores
+        # swap head and token dims, so each head now has its own T x 64 matrix
+        # each head has its own T, 64 representation of the sequence
+        Q = torch.transpose(Q, -3, -2)
+        K = torch.transpose(K, -3, -2)
+        V = torch.transpose(V, -3, -2)
+        # shape (B, 12, T, 64)
 
-            # causal mask, set every score above the diagonal to -inf
-            # so a token cant look at future tokens, and -inf softmaxes to 0
-            # tril gives True on and below the diagonal, same shape as the scores
-            mask = torch.tril(torch.ones(scaled_scores.shape, dtype=torch.bool))
-            # invert it, masked_fill wants True where we fill (the upper part)
-            mask = ~mask
-            masked_scores = torch.masked_fill(scaled_scores, mask, float("-inf"))
+        # each token gets a score w/ every other token, Q @ K^T
+        scores = torch.matmul(Q, torch.transpose(K, -2, -1))  # shape (B, 12, T, T)
+        # scale by 1 / sqrt(d_k), otherwise dot products grow w/ the dim
+        # and softmax gets super peaky
+        scale = self.head_dim ** -0.5
+        scaled_scores = scale * scores
 
-            # softmax along dim -1 i.e. across each row, so each token's weights
-            # over all the tokens it can see sum to 1
-            weights = torch.softmax(masked_scores, dim=-1)  # shape (B, T, T), same
-            # weighted sum of the value rows, do it all at once via matmul
-            # matmul only uses the last 2 dims, B just rides along
-            # (B, T, T) x (B, T, 64) = (B, T, 64)
-            # each output row is a linear comb of the V rows w/ that token's weights
-            head_attn = torch.matmul(weights, W_V)
+        # causal mask, set every score above the diagonal to -inf
+        # so a token cant look at future tokens, and -inf softmaxes to 0
+        # triu gives True above the diagonal, masked_fill wants True where we fill
+        # the (T, T) mask broadcasts across B and the heads
+        mask = torch.triu(
+            torch.ones(T, T, device=Q.device, dtype=torch.bool),
+            diagonal=1
+        )
+        masked_scores = scaled_scores.masked_fill(mask, float("-inf"))
 
-            multihead_attn.append(head_attn)
-
-        # cat the 12 (B, T, 64) heads along the last dim to get (B, T, 768) back
-        multihead_attn = torch.cat(multihead_attn, dim=-1)
+        # softmax along dim -1 i.e. across each row, so each token's weights
+        # over all the tokens it can see sum to 1
+        weights = torch.softmax(masked_scores, dim=-1)  # shape (B, 12, T, T), same
+        # weighted sum of the value rows, do it all at once via matmul
+        # matmul only uses the last 2 dims, B and the heads just ride along
+        # (B, 12, T, T) x (B, 12, T, 64) = (B, 12, T, 64)
+        # each output row is a linear comb of the V rows w/ that token's weights
+        multihead_attn = torch.matmul(weights, V)
+        multihead_attn = multihead_attn.transpose(1, 2)
+        # (B, T, 12, 64)
+        # join the 12 heads along the last dim to get (B, T, 768) back
+        multihead_attn = multihead_attn.contiguous().view(B, T, self.n_embd)
         # atp each head's info just sits in its own cols, c_proj mixes them together
         attn = self.c_proj(multihead_attn)
 
