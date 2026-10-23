@@ -1,20 +1,28 @@
 # compare my model against hf's gpt2, same input tokens should give the same logits
 # if they dont match, find the first step where they split
+import argparse
+
 import tiktoken
 import torch
 from transformers import GPT2LMHeadModel
 
-from model import GPT2
+from gpt2_engine.model import GPT2
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+args = parser.parse_args()
 
 PROMPT = "The quick brown fox jumps over the lazy dog because"
 TOL = 1e-3  # how far apart values can be and still count as matching
 
 enc = tiktoken.get_encoding("gpt2")
-ids = torch.tensor([enc.encode(PROMPT)])  # the extra [] makes it shape (1, T)
+ids = torch.tensor(
+    [enc.encode(PROMPT)], device=args.device
+)  # the extra [] makes it shape (1, T)
 print(f"prompt: {PROMPT!r} ({ids.shape[1]} tokens)\n")
 
-mine = GPT2.from_pretrained().eval()
-hf = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+mine = GPT2.from_pretrained().to(args.device).eval()
+hf = GPT2LMHeadModel.from_pretrained("gpt2").to(args.device).eval()
 
 # hooks on my model to save the output after every step
 # so if the logits dont match we can see where it first goes wrong
@@ -89,3 +97,5 @@ if not match:
         else:
             print(f"  {name:24s} {d:.2e}  <-- first mismatch")
             break
+
+assert match, "logits differ from HF"

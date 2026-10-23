@@ -1,6 +1,6 @@
-notes.md
 .venv
 .DS_STORE
-tests.py
 __pycache__/
 .ruff_cache/
+
+explore.py

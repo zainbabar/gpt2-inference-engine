@@ -1,10 +1,16 @@
 # does my greedy generation give the exact same text as hf's greedy generation
+import argparse
+
 import tiktoken
 import torch
 from transformers import GPT2LMHeadModel
 
-from generate import generate
-from model import GPT2
+from gpt2_engine.generate import generate
+from gpt2_engine.model import GPT2
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+args = parser.parse_args()
 
 PROMPTS = [
     "The quick brown fox",
@@ -14,15 +20,15 @@ PROMPTS = [
 N = 40  # new tokens per prompt
 
 enc = tiktoken.get_encoding("gpt2")
-mine = GPT2.from_pretrained().eval()
-hf = GPT2LMHeadModel.from_pretrained("gpt2").eval()
+mine = GPT2.from_pretrained().to(args.device).eval()
+hf = GPT2LMHeadModel.from_pretrained("gpt2").to(args.device).eval()
 
 all_match = True
 for prompt in PROMPTS:
     # [0] b/c generate returns a list w/ 1 text per sequence in the batch
     my_text = generate(mine, prompt, max_new_tokens=N)[0]
 
-    ids = torch.tensor([enc.encode(prompt)])  # shape (1, T)
+    ids = torch.tensor([enc.encode(prompt)], device=args.device)  # shape (1, T)
     with torch.no_grad():
         # do_sample=False is greedy, always take the top token, same as ours
         # gpt2 has no pad token so we hand it end of text (50256), and the mask
@@ -66,3 +72,5 @@ if all_match:
     print("\nall prompts match")
 else:
     print("\nsome prompts differ")
+
+assert all_match, "greedy generation differs from HF"

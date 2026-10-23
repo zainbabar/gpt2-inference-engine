@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Self
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 @dataclass
@@ -39,6 +39,15 @@ class Attention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = config.n_embd // config.n_head  # 768 / 12 = 64 per head
 
+        self.cache = False
+        self.K_cache = None
+        self.V_cache = None
+
+    # clear history before a new sequence, so prompts dont get mixed up
+    def reset(self):
+        self.K_cache = None
+        self.V_cache = None
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         # B = batch size, T = # of tokens, every tensor keeps B as dim 0
         # inputs have shape (B, T, 768)
@@ -53,7 +62,7 @@ class Attention(nn.Module):
         # each head does its own scores, causal mask, and softmax
         # so we split up the heads and do them all at once
 
-        # VECTORIZED MULTIHEAD ATTENTION
+        # vectorized multi-head attention
         # reshape the last dim into 12 x 64
         # tensor.view returns same data w/ diff shape
         Q = Q.view(B, T, self.n_head, (self.n_embd // self.n_head))
@@ -68,36 +77,59 @@ class Attention(nn.Module):
         V = torch.transpose(V, -3, -2)
         # shape (B, 12, T, 64)
 
+        # first cached call: save the whole prompt
+        if self.cache and self.K_cache is None and self.V_cache is None:
+            prefill = True
+            self.K_cache = K
+            self.V_cache = V
+        # later calls: add the new token to the saved history
+        elif self.cache:
+            prefill = False
+            K = torch.cat((self.K_cache, K), dim=-2)  # concat along the token dim (-2)
+            V = torch.cat((self.V_cache, V), dim=-2)  # concat along the token dim (-2)
+            # update our caches for the next pass
+            self.K_cache = K
+            self.V_cache = V
+
         # each token gets a score w/ every other token, Q @ K^T
         scores = torch.matmul(Q, torch.transpose(K, -2, -1))  # shape (B, 12, T, T)
+        # during decoding: (B, 12, 1, total tokens so far)
+
         # scale by 1 / sqrt(d_k), otherwise dot products grow w/ the dim
         # and softmax gets super peaky
-        scale = self.head_dim ** -0.5
+        scale = self.head_dim**-0.5
         scaled_scores = scale * scores
 
         # causal mask, set every score above the diagonal to -inf
         # so a token cant look at future tokens, and -inf softmaxes to 0
         # triu gives True above the diagonal, masked_fill wants True where we fill
-        # the (T, T) mask broadcasts across B and the heads
+        # the mask broadcasts across B and the heads
         mask = torch.triu(
-            torch.ones(T, T, device=Q.device, dtype=torch.bool),
-            diagonal=1
+            torch.ones(
+                (scores.shape[-2], scores.shape[-1]), device=Q.device, dtype=torch.bool
+            ),
+            diagonal=1,  # 1 diagonal above the main diagonal to keep self attn
         )
         masked_scores = scaled_scores.masked_fill(mask, float("-inf"))
 
+        # one-token decoding can see all saved tokens and itself
+        # prefill still needs the causal mask
+        if self.cache and not prefill:
+            masked_scores = scaled_scores
+
         # softmax along dim -1 i.e. across each row, so each token's weights
         # over all the tokens it can see sum to 1
-        weights = torch.softmax(masked_scores, dim=-1)  # shape (B, 12, T, T), same
+        weights = torch.softmax(masked_scores, dim=-1)  # same shape as scores
         # weighted sum of the value rows, do it all at once via matmul
         # matmul only uses the last 2 dims, B and the heads just ride along
-        # (B, 12, T, T) x (B, 12, T, 64) = (B, 12, T, 64)
+        # query length is T; K/V also include saved tokens when caching
         # each output row is a linear comb of the V rows w/ that token's weights
         multihead_attn = torch.matmul(weights, V)
         multihead_attn = multihead_attn.transpose(1, 2)
         # (B, T, 12, 64)
         # join the 12 heads along the last dim to get (B, T, 768) back
         multihead_attn = multihead_attn.contiguous().view(B, T, self.n_embd)
-        # atp each head's info just sits in its own cols, c_proj mixes them together
+        # each head's info just sits in its own cols, c_proj mixes them together
         attn = self.c_proj(multihead_attn)
 
         return attn
@@ -113,6 +145,14 @@ class Block(nn.Module):
         self.attn = Attention(config)
         self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
+        self.cache = False
+
+    def set_caching(self, status):
+        self.cache = status
+        self.attn.cache = status
+
+    def reset(self):
+        self.attn.reset()
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         # inputs + ... is the residual (skip) connection, each piece just adds
@@ -151,6 +191,16 @@ class GPT2(nn.Module):
         # so 1 table is used both ways
         # wte: token -> vector, lm_head: vector -> token
         self.lm_head.weight = self.wte.weight
+        self.cache = False
+        self.cache_len = 0
+
+    def set_caching(self, status):
+        self.cache = status
+        [block.set_caching(status) for block in self.h]
+
+    def reset_cache(self):
+        [block.reset() for block in self.h]  # reset kv cache of all blocks
+        self.cache_len = 0
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         # build the embeddings first from tokens
@@ -160,8 +210,20 @@ class GPT2(nn.Module):
         # wte looks up by token id, wpe looks up by token POSITION
         # i.e. the token at position i gets wte[token_id] + wpe[i]
         T = token_ids.shape[-1]
-        positons = torch.arange(T)  # positions 0 to T-1 for the lookup
-        P = self.wpe(positons)
+
+        positions = torch.arange(T, device=token_ids.device)  # positions 0 to T-1
+
+        # prefill starts at position 0 and saves the prompt length
+        # later tokens need the offset from all the tokens already cached
+        if self.cache and self.cache_len == 0:
+            self.cache_len = T
+        elif self.cache:  # cache already exists, offset the position
+            positions = positions + self.cache_len
+            # i.e. 5 tokens cached for len = 5, 6th token gets pos 5 for 0indexed lookup
+            # this will be cached after this forward pass so up len
+            self.cache_len += 1
+
+        P = self.wpe(positions)
         # P has shape (T, 768)
         embeddings = E + P
         # works b/c pytorch broadcasts P across B
@@ -184,7 +246,7 @@ class GPT2(nn.Module):
 
         # build the model here and load the weights
         # so when we create a model in main it already has weights
-        gpt2 = cls(GPT2Config)  # cls is the class, gpt2 is an object/instance
+        gpt2 = cls(GPT2Config())  # cls is the class, gpt2 is an object/instance
         hf = GPT2LMHeadModel.from_pretrained("gpt2")
         hf_sd = hf.state_dict()
         sd = gpt2.state_dict()  # our gpt2's state dict
