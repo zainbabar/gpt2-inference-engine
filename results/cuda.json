@@ -1,0 +1,188 @@
+{
+  "timestamp_utc": "2026-10-23T18:29:45.410507+00:00",
+  "platform": "Linux-6.17.0-1014-nvidia-aarch64-with-glibc2.39",
+  "machine": "aarch64",
+  "processor": "aarch64",
+  "python": "3.14.8",
+  "torch": "2.14.1+cu130",
+  "device": "cuda",
+  "device_name": "NVIDIA GB10",
+  "dtype": "torch.float32",
+  "threads": 4,
+  "warmup": 1,
+  "repeats": 3,
+  "prompt_text_repeated": "The quick brown fox jumps over the lazy dog. In linear algebra, a matrix transforms vectors. ",
+  "method": "batch 1 greedy; prefill + decode; excludes loading, tokenization, reset, and text decoding",
+  "results": [
+    {
+      "total_tokens": 64,
+      "prompt_tokens": 32,
+      "new_tokens": 32,
+      "uncached": {
+        "seconds": [
+          0.161659938050434,
+          0.16158700897358358,
+          0.16107445093803108
+        ],
+        "median_seconds": 0.16158700897358358,
+        "tokens_per_second": 198.03572207485686,
+        "prefill_seconds": [
+          0.004128314089030027,
+          0.004111881135031581,
+          0.004111194051802158
+        ]
+      },
+      "cached": {
+        "seconds": [
+          0.10229503898881376,
+          0.10296279797330499,
+          0.10235937498509884
+        ],
+        "median_seconds": 0.10235937498509884,
+        "tokens_per_second": 312.62402691163817,
+        "prefill_seconds": [
+          0.0041319450829178095,
+          0.004538697190582752,
+          0.004139096941798925
+        ]
+      },
+      "speedup": 1.5786244200602721
+    },
+    {
+      "total_tokens": 128,
+      "prompt_tokens": 96,
+      "new_tokens": 32,
+      "uncached": {
+        "seconds": [
+          0.23001125385053456,
+          0.2299268231727183,
+          0.22756498586386442
+        ],
+        "median_seconds": 0.2299268231727183,
+        "tokens_per_second": 139.17471462632258,
+        "prefill_seconds": [
+          0.006521076895296574,
+          0.006526758195832372,
+          0.006540709873661399
+        ]
+      },
+      "cached": {
+        "seconds": [
+          0.10930544417351484,
+          0.10703789489343762,
+          0.107812694972381
+        ],
+        "median_seconds": 0.107812694972381,
+        "tokens_per_second": 296.8110574380654,
+        "prefill_seconds": [
+          0.006543845171108842,
+          0.006511572981253266,
+          0.0065551260486245155
+        ]
+      },
+      "speedup": 2.1326507349771746
+    },
+    {
+      "total_tokens": 256,
+      "prompt_tokens": 224,
+      "new_tokens": 32,
+      "uncached": {
+        "seconds": [
+          0.33673388604074717,
+          0.33543761586770415,
+          0.3332263398915529
+        ],
+        "median_seconds": 0.33543761586770415,
+        "tokens_per_second": 95.39776842624808,
+        "prefill_seconds": [
+          0.010816318914294243,
+          0.010058304062113166,
+          0.010119343874976039
+        ]
+      },
+      "cached": {
+        "seconds": [
+          0.1158669542055577,
+          0.11491799587383866,
+          0.11538386694155633
+        ],
+        "median_seconds": 0.11538386694155633,
+        "tokens_per_second": 277.33513226947474,
+        "prefill_seconds": [
+          0.010831071063876152,
+          0.010446191998198628,
+          0.010081408079713583
+        ]
+      },
+      "speedup": 2.9071448614008433
+    },
+    {
+      "total_tokens": 512,
+      "prompt_tokens": 480,
+      "new_tokens": 32,
+      "uncached": {
+        "seconds": [
+          0.6362980869598687,
+          0.6361034321598709,
+          0.6362717200536281
+        ],
+        "median_seconds": 0.6362717200536281,
+        "tokens_per_second": 50.292978599304845,
+        "prefill_seconds": [
+          0.019474433036521077,
+          0.019374305149540305,
+          0.01912673795595765
+        ]
+      },
+      "cached": {
+        "seconds": [
+          0.1317730089649558,
+          0.12986840400844812,
+          0.13164598494768143
+        ],
+        "median_seconds": 0.13164598494768143,
+        "tokens_per_second": 243.07615619813546,
+        "prefill_seconds": [
+          0.01919016195461154,
+          0.019181889947503805,
+          0.019198177848011255
+        ]
+      },
+      "speedup": 4.833202625256625
+    },
+    {
+      "total_tokens": 1024,
+      "prompt_tokens": 992,
+      "new_tokens": 32,
+      "uncached": {
+        "seconds": [
+          1.9251160800922662,
+          1.9221601991448551,
+          1.9247445480432361
+        ],
+        "median_seconds": 1.9247445480432361,
+        "tokens_per_second": 16.625582876715946,
+        "prefill_seconds": [
+          0.05942347412928939,
+          0.06019702600315213,
+          0.05806670896708965
+        ]
+      },
+      "cached": {
+        "seconds": [
+          0.1839529280550778,
+          0.18216211395338178,
+          0.18302777712233365
+        ],
+        "median_seconds": 0.18302777712233365,
+        "tokens_per_second": 174.8368499203898,
+        "prefill_seconds": [
+          0.05929792299866676,
+          0.05865107593126595,
+          0.05792875704355538
+        ]
+      },
+      "speedup": 10.516133552541367
+    }
+  ]
+}

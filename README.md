@@ -2,18 +2,22 @@
 
 GPT-2 small (124M) built from scratch in PyTorch, with Hugging Face's pretrained weights. I wrote the forward pass, vectorized multi-head attention, sampling, and a KV cache, then checked the outputs against Hugging Face and against my own uncached model.
 
-![Cached and uncached generation throughput and speedup](results/cpu.png)
+On the GX10's NVIDIA GB10, the KV cache increased generation throughput from **16.63 to 174.84 tokens/sec (10.52×)** for a 992-token prompt and 32 generated tokens. Median time fell from **1.92 s to 0.183 s**, including prefill. The same workload on an Apple M3 Pro CPU improved from **2.34 to 42.49 tokens/sec (18.13×)**.
 
-On an Apple M3 Pro CPU with four PyTorch threads, caching reduced median generation time from **13.66 s to 0.75 s (18.13×)** at 1,024 total tokens: a 992-token prompt and 32 generated tokens. Throughput increased from **2.34 to 42.49 tokens/sec**.
+![NVIDIA GB10 cached and uncached generation throughput and speedup](results/cuda.png)
 
-The plot measures batch-one greedy generation on CPU, including prefill. Each point generates 32 tokens; the rest of the sequence is the prompt. Raw timings and environment details are in [results/cpu.json](results/cpu.json). A separate rerun reached **17.72×** at the same longest length; its samples are in [results/cpu-repeat.json](results/cpu-repeat.json). Short-run results varied more: the 64-token speedup was 4.38× initially and 3.80× on the rerun.
+![Apple M3 Pro CPU cached and uncached generation throughput and speedup](results/cpu.png)
+
+Both plots use float32, batch-one greedy generation, and median timings from three runs. Each point generates 32 tokens; the rest of the sequence is the prompt. The GPU has higher throughput with and without caching; the CPU has a larger relative cache speedup at the longest length. These ratios compare each device against its own uncached baseline.
+
+Raw timings and environment details are in [results/cuda.json](results/cuda.json) and [results/cpu.json](results/cpu.json). A separate CPU rerun reached **17.72×** at the longest length; its samples are in [results/cpu-repeat.json](results/cpu-repeat.json). Short CPU runs varied more: the 64-token speedup was 4.38× initially and 3.80× on the rerun. The GPU results are from one benchmark invocation with three measured repeats per mode and length.
 
 ## Run it
 
 Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync
+uv sync --python 3.14
 uv run python -m gpt2_engine.generate
 ```
 
@@ -74,6 +78,8 @@ uv run python -m tests.run_checks
 
 The latest CPU run passed all five checks. Maximum absolute difference from Hugging Face was **2.86e-6** for block-0 attention and **1.22e-4** for full-model logits on the checked inputs. Greedy generation matched on all three comparison prompts. Full output is in [results/verification-cpu.txt](results/verification-cpu.txt).
 
+All five checks also passed on the GX10 GPU, including exact cached-versus-uncached greedy tokens and all three Hugging Face generation comparisons. The maximum absolute full-model logit difference from Hugging Face was **6.87e-5**. The GPU log is in [results/verification-cuda.txt](results/verification-cuda.txt).
+
 This runs all five checks in separate processes and saves their output to `results/verification-cpu.txt`. Failed assertions cause a nonzero exit status.
 
 - `tests/test_attention.py`: attention output shapes, causality, and agreement with Hugging Face block-0 attention.
@@ -91,7 +97,7 @@ uv run python -m benchmarks.benchmark_kv_cache --device cpu --threads 4 --output
 uv run python -m benchmarks.plot_results results/cpu.json --output results/cpu.png
 ```
 
-The saved CPU run used macOS 26.6.2 (arm64), Python 3.14.7, PyTorch 2.14.1, and four PyTorch threads on an Apple M3 Pro, measured October 23, 2026.
+Both devices were measured October 23, 2026. The CPU run used an Apple M3 Pro, macOS 26.6.2 (arm64), Python 3.14.7, and PyTorch 2.14.1. The GX10 run used an NVIDIA GB10, Linux 6.17.0-1014-nvidia (aarch64), Python 3.14.8, and PyTorch 2.14.1+cu130 (CUDA 13.0). Both used four PyTorch CPU threads.
 
 The benchmark uses float32, batch size one, greedy decoding, and total sequence lengths of 64, 128, 256, 512, and 1,024. Each prompt is a token-counted prefix of the same repeated text, with 32 additional generated tokens. The longest run therefore has a 992-token prompt.
 
@@ -99,7 +105,7 @@ For each length, both modes get one warmup run, followed by three measured runs 
 
 Every measured repeat also checks that the cached and uncached token IDs match exactly.
 
-The cached line still falls as sequence length grows: the prompt takes longer to process, and decoding reads a longer K/V history. At the longest length, the cached run spent about 0.38 s of its 0.75 s in the prefill portion. The uncached version repeats work over almost the entire prompt another 31 times, so its total time grows much faster. There was visible timing noise, especially at 512 tokens; the plot retains the full sample range.
+The cached line still falls as sequence length grows: the prompt takes longer to process, and decoding reads a longer K/V history. At the longest length, the cached CPU run spent about 0.38 s of its 0.75 s in the prefill portion. On the GPU, the corresponding prefill portion was about 0.059 s out of 0.183 s total. The uncached version repeats work over almost the entire prompt another 31 times, so its total time grows much faster. There was visible CPU timing noise, especially at 512 tokens; the plots retain the full sample ranges.
 
 This measures a fixed generation length with increasingly long prompts. It is not a measurement of 1,024 newly generated tokens or a comparison against Hugging Face's performance. The longest actual forward pass processes 1,023 positions; the final sampled token brings the output to 1,024.
 
@@ -108,7 +114,7 @@ This measures a fixed generation length with increasingly long prompts. It is no
 Copy the repository to the GX10, excluding the Mac's `.venv`, and create a fresh environment there. Install a CUDA-enabled PyTorch build compatible with that machine if the resolved environment does not provide one. Check the environment before benchmarking:
 
 ```bash
-uv sync
+uv sync --python 3.14
 uv run python -c 'import torch; print(torch.__version__); print(torch.cuda.is_available())'
 uv run python -m gpt2_engine.generate --device cuda
 uv run python -m tests.run_checks --device cuda --output results/verification-cuda.txt
@@ -116,7 +122,7 @@ uv run python -m benchmarks.benchmark_kv_cache --device cuda --output results/cu
 uv run python -m benchmarks.plot_results results/cuda.json --output results/cuda.png
 ```
 
-The generation inputs and position indices follow the model's device. Caches stay on the device where they were created; reset them before moving a model with existing history. CUDA support is wired into the scripts, but the checked-in measurements and verification are from CPU. I have not measured or verified the GX10 yet.
+The generation inputs and position indices follow the model's device. Caches stay on the device where they were created; reset them before moving a model with existing history. The checked-in measurements and verification logs cover both the Mac CPU and the GX10 GPU. Re-run the checks when changing hardware, precision, dependencies, or the implementation.
 
 ## Scope and lessons
 

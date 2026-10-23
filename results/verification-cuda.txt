@@ -1,0 +1,92 @@
+UTC: 2026-10-23T18:28:43.765424+00:00
+Python: 3.14.8, torch: 2.14.1+cu130, device: cuda
+
+$ python -m tests.test_attention --device cuda
+1. shapes: ok
+2. causality: earlier rows changed by 0.00e+00  ok
+3. vs HF block 0: max abs diff 3.81e-06  ok
+
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 10148.06it/s]
+
+exit status: 0
+
+$ python -m tests.test_logits_against_hf --device cuda
+prompt: 'The quick brown fox jumps over the lazy dog because' (10 tokens)
+
+logits shape: mine (1, 10, 50257), HF (1, 10, 50257)
+max abs logit difference: 6.87e-05  MATCH
+
+next token, mine: ' he' 0.280, ' it' 0.199, ' the' 0.100, ' she' 0.092, ' they' 0.049
+next token, HF:   ' he' 0.280, ' it' 0.199, ' the' 0.100, ' she' 0.092, ' they' 0.049
+
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 9702.66it/s]
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 15110.93it/s]
+
+exit status: 0
+
+$ python -m tests.test_greedy_against_hf --device cuda
+
+prompt: 'The quick brown fox'
+  MATCH
+  'The quick brown foxes are a great way to get a little bit of a kick out of your dog.\n\nThe quick brown foxes are a great way to get a little bit of a kick out of your'
+
+prompt: 'Once upon a time,'
+  MATCH
+  'Once upon a time, the world was a place of great beauty and great danger. The world was a place of great danger, and the world was a place of great danger. The world was a place of great danger,'
+
+prompt: 'In linear algebra, an eigenvector is'
+  MATCH
+  'In linear algebra, an eigenvector is a vector of elements.\n\nThe following example shows how to use the eigenvector to represent a vector of elements.\n\nimport math import time import matplotlib.pyplot as pl'
+
+all prompts match
+
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 16149.99it/s]
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 12176.96it/s]
+
+exit status: 0
+
+$ python -m tests.test_sampling --device cuda
+PASS  greedy (default) is deterministic
+PASS  top_k=1 at temperature 1.0 equals greedy
+PASS  same seed gives the same sample
+PASS  different seeds give different samples
+PASS  probabilities sum to 1, no NaN
+PASS  top_k=5: at most 5 possible tokens per step  (max seen 5)
+PASS  top_k=50: at most 50 possible tokens per step  (max seen 50)
+PASS  lower temperature makes the top token more likely  (avg top prob 0.69 at 0.5 vs 0.00 at 2.0)
+PASS  tiny top_p equals greedy
+PASS  top_p=0.9: number of kept tokens varies by step  (first steps: [110, 305, 69, 1, 43, 100, 11, 229])
+
+all checks pass
+
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 8507.37it/s]
+
+exit status: 0
+
+$ python -m tests.test_kv_cache --device cuda
+1. logits and cache lengths: ok
+2. reset: ok
+3. greedy tokens, one-token calls, repeated generation: ok for 'The quick brown fox'
+3. greedy tokens, one-token calls, repeated generation: ok for 'Once upon a time,'
+3. greedy tokens, one-token calls, repeated generation: ok for 'In linear algebra, an eigenvector is'
+3. greedy tokens, one-token calls, repeated generation: ok for ''
+
+all cache checks pass
+
+
+Loading weights:   0%|          | 0/148 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 148/148 [00:00<00:00, 7705.62it/s]
+
+exit status: 0
